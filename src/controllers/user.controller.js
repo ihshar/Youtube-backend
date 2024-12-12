@@ -156,7 +156,7 @@ const loginUser = asyncHandler(async (req, res) => {
 });
 
 const logoutUser = asyncHandler(async (req, res) => {
-  await User.findByIdAndUpdate(req.user._id,{
+  const data = await User.findByIdAndUpdate(req.user._id,{
     $set:{
       refreshToken:undefined
     },
@@ -165,6 +165,8 @@ const logoutUser = asyncHandler(async (req, res) => {
     new:true
   }
   )
+
+  console.log(data)
 
   const options={
     httpOnly:true,
@@ -175,7 +177,7 @@ const logoutUser = asyncHandler(async (req, res) => {
   .status(200)
   .clearCookie("refreshToken",options)
   .clearCookie("accessToken",options)
-  .json(new ApiResponse(200,"User Logged Out"))
+  .json(new ApiResponse(200,{},"User Logged Out"))
 
 
 
@@ -192,13 +194,16 @@ const refreshAccessToken = asyncHandler(async(req,res) => {
     const decodeToken = jwt.verify(incomingRefreshToken,process.env.REFRESH_TOKEN_SECRET)
   
     const user = await User.findById(decodeToken._id).select("-password -refreshToken")
-  
+
     if(!user){
       throw new ApiError(401,"Invalid Refresh Token")
     }
-  
+    
     const {accessToken,newRefreshToken} = await generateAccessAndRefreshToken(user._id)
   
+    if(incomingRefreshToken !== user?.refreshToken ){
+      throw new ApiError(401,"Refresh Token is expired or used")
+    }
     const options={
       httpOnly:true,
       secure:true
@@ -221,9 +226,6 @@ const refreshAccessToken = asyncHandler(async(req,res) => {
   } catch (error) {
      throw new ApiError(401,error?.message || "Invalid Refresh Token")
   }
-  
-
-
   
 })
 export { registerUser, loginUser ,logoutUser, refreshAccessToken};
