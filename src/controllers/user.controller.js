@@ -3,10 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { User } from "../models/user.models.js";
 import { uploadOnCloudinay } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
-import jwt from "jsonwebtoken";
-import verifyJWT from "../middlewares/auth.middleware.js";
-import { response } from "express";
-import mongooseAggregatePaginate from "mongoose-aggregate-paginate-v2";
+import jwt, { decode } from "jsonwebtoken";
 import mongoose from "mongoose";
 
 const generateAccessAndRefreshToken = async (userId) => {
@@ -144,8 +141,8 @@ const loginUser = asyncHandler(async (req, res) => {
 
   return res
     .status(200)
-    .cookie("accessToken", accessToken)
-    .cookie("refreshToken", refreshToken)
+    .cookie("accessToken", accessToken,options)
+    .cookie("refreshToken", refreshToken,options)
     .json(
       new ApiResponse(
         200,
@@ -160,19 +157,17 @@ const loginUser = asyncHandler(async (req, res) => {
 });
 
 const logoutUser = asyncHandler(async (req, res) => {
-  const data = await User.findByIdAndUpdate(
+  await User.findByIdAndUpdate(
     req.user._id,
     {
-      $set: {
-        refreshToken: undefined,
+      $unset: {
+        refreshToken: 1,
       },
     },
     {
       new: true,
     }
   );
-
-  console.log(data);
 
   const options = {
     httpOnly: true,
@@ -188,7 +183,7 @@ const logoutUser = asyncHandler(async (req, res) => {
 
 const refreshAccessToken = asyncHandler(async (req, res) => {
   const incomingRefreshToken =
-    req.cookies.refreshToken || req.body.refreshToken;
+    req.cookies?.refreshToken || req.body.refreshToken;
 
   if (!incomingRefreshToken) {
     throw new ApiError(401, "Unauthorized Request");
@@ -201,15 +196,14 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
     );
 
     const user = await User.findById(decodeToken._id).select(
-      "-password -refreshToken"
+      "-password "
     );
 
     if (!user) {
       throw new ApiError(401, "Invalid Refresh Token");
     }
 
-    const { accessToken, newRefreshToken } =
-      await generateAccessAndRefreshToken(user._id);
+    const { accessToken, newRefreshToken } = await generateAccessAndRefreshToken(user._id);
 
     if (incomingRefreshToken !== user?.refreshToken) {
       throw new ApiError(401, "Refresh Token is expired or used");
@@ -241,7 +235,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 const changeCurrentPassword = asyncHandler(async (req, res) => {
   const { oldPassword, newPassword } = req.body;
 
-  const user = User.findById(req.user?._id);
+  const user = await User.findById(req.user?._id);
 
   const isPasswordCorrect = user.isPasswordCorrect(oldPassword);
 
@@ -264,13 +258,13 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 const getCurrentUser = asyncHandler(async (req, res) => {
   return res
     .status(200)
-    .json(200, req.user, "Cuurent U ser Fetched Successfully");
+    .json(new ApiResponse(200, req.user._id, "Current User Fetched Successfully"));
 });
 
 const updateAccountDetails = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
-  if (!email || !password) {
+  if (!email && !password) {
     throw new ApiError(400, "All fields are required");
   }
 
@@ -430,52 +424,51 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 });
 
 const getWatchHistory = asyncHandler(async (req, res) => {
-
   const user = await User.aggregate([
     {
-      $match:{
-        _id:mongoose.Types.ObjectId(req.user?._id)
-      }
+      $match: {
+        _id: new mongoose.Types.ObjectId(req.user?._id),
+      },
     },
     {
-      $lookup:{
-        from:"videos",
-        localField:"watchHistory",
-        foreignField:"_id",
-        as:"watchHistory",
-        pipeline:[
+      $lookup: {
+        from: "videos",
+        localField: "watchHistory",
+        foreignField: "_id",
+        as: "watchHistory",
+        pipeline: [
           {
-            $lookup:{
-              from:"users",
-              localField:"owner",
-              foreignField:"_id",
-              as:"owner",
-              pipeline:[
+            $lookup: {
+              from: "users",
+              localField: "owner",
+              foreignField: "_id",
+              as: "owner",
+              pipeline: [
                 {
-                  $project:{
-                    fullName:1,
-                    username:1,
-                    avatar:1,
-                  }
-                }
-              ]
-            }
+                  $project: {
+                    fullName: 1,
+                    username: 1,
+                    avatar: 1,
+                  },
+                },
+              ],
+            },
           },
           {
-            $addFields:{
-              owner:{
-                $first:"$owner"
-              }
-            }
-          }
-        ]
-      }
+            $addFields: {
+              owner: {
+                $first: "$owner",
+              },
+            },
+          },
+        ],
+      },
     },
-  ])
+  ]);
 
   return res
-  .status(200)
-  .json(200,user[0].watchHistory,"Watched History Succeddfully")
+    .status(200)
+    .json(new ApiResponse(200, user[0].watchHistory, "Watched History Successfully"));
 });
 
 export {
@@ -489,5 +482,5 @@ export {
   updateUserAvatar,
   updateUserCoverImage,
   getUserChannelProfile,
-  getWatchHistory
+  getWatchHistory,
 };
